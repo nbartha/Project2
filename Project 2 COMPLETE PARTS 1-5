@@ -1,0 +1,238 @@
+# AER850 PROJECT 2 - DCNN MODEL IMPLEMENTATION
+
+# Step 2.0 - importing the libraries
+
+import os
+import zipfile
+import numpy as np
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras import layers, models
+from tensorflow.keras.layers import LeakyReLU
+from tensorflow.keras.preprocessing.image import ImageDataGenerator, load_img, img_to_array
+import matplotlib.pyplot as plt
+
+# Check TensorFlow and Keras versions
+print(f"\nTensorFlow Version: {tf.__version__}")
+print(f"Keras Version: {keras.__version__}\n")
+
+# Sstep 2.1 - DATA EXTRACTION AND PROCESSING
+
+# Define file paths
+zip_path = "DataSet.zip"
+extract_dir = "Data" # Corrected directory name
+
+# Automatically extract ZIP file if not already extracted
+if not os.path.exists(extract_dir):
+    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+        zip_ref.extractall("Data") # Extract to 'Data' directory
+    print(f" Dataset extracted successfully to: {extract_dir}")
+else:
+    print(f" Dataset already exists at: {extract_dir}")
+
+# Confirm folder structure
+for root, dirs, files in os.walk(extract_dir):
+    print(root, "->", len(files), "files")
+
+# Define image parameters
+img_height, img_width = 500, 500
+img_channel = 3
+batch_size = 32
+img_shape = (img_width, img_height, img_channel)
+
+# Define directory paths
+train_directory = os.path.join(extract_dir, "Data", "train")
+valid_directory = os.path.join(extract_dir, "Data", "valid")
+
+# Data augmentation for training
+train_datagen = ImageDataGenerator(
+    rescale=1./255,
+    shear_range=0.2,
+    zoom_range=0.2,
+    horizontal_flip=True
+)
+
+# Only rescaling for validation
+valid_datagen = ImageDataGenerator(rescale=1./255)
+
+# Create data generators
+train_generator = train_datagen.flow_from_directory(
+    train_directory,
+    target_size=(img_height, img_width),
+    batch_size=batch_size,
+    class_mode='categorical'
+)
+
+validation_generator = valid_datagen.flow_from_directory(
+    valid_directory,
+    target_size=(img_height, img_width),
+    batch_size=batch_size,
+    class_mode='categorical'
+)
+
+print("\nTrain Samples:", train_generator.samples)
+print("Validation Samples:", validation_generator.samples)
+print("Class Indices:", train_generator.class_indices)
+
+
+# step 2.1b - VISUALIZE SAMPLE IMAGES
+
+
+images, labels = next(train_generator)
+class_names = list(train_generator.class_indices.keys())
+
+plt.figure(figsize=(10, 10))
+for i in range(9):
+    plt.subplot(3, 3, i + 1)
+    plt.imshow(images[i])
+    plt.title(class_names[np.argmax(labels[i])])
+    plt.axis("off")
+plt.suptitle("Sample Training Images")
+plt.show()
+
+
+# step 2.2 - NEURAL NETWORK ARCHITECTURE DESIGN
+
+
+dcnn_model = models.Sequential([
+    layers.Input(shape=img_shape),
+
+    # Convolution Block 1
+    layers.Conv2D(32, (3, 3), activation='relu'),
+    layers.MaxPooling2D((2, 2)),
+
+    # Convolution Block 2
+    layers.Conv2D(64, (3, 3)),
+    LeakyReLU(negative_slope=0.01),
+    layers.MaxPooling2D((2, 2)),
+    layers.Dropout(0.25),
+
+    # Convolution Block 3
+    layers.Conv2D(128, (3, 3), activation='relu'),
+    layers.MaxPooling2D((2, 2)),
+    layers.Dropout(0.3),
+
+    # Convolution Block 4
+    layers.Conv2D(256, (3, 3), activation='relu'),
+    layers.MaxPooling2D((2, 2)),
+    layers.Dropout(0.4),
+
+    # Flatten + Fully Connected Layers
+    layers.Flatten(),
+    layers.Dense(64, activation='relu'),
+    layers.Dropout(0.5),
+
+    # Output Layer (3 classes)
+    layers.Dense(3, activation='softmax')
+])
+
+dcnn_model.compile(optimizer='adam',
+                   loss='categorical_crossentropy',
+                   metrics=['accuracy'])
+
+dcnn_model.summary()
+
+# step 2.4 - MODEL TRAINING
+
+training_history = dcnn_model.fit(
+    train_generator,
+    epochs=30,
+    validation_data=validation_generator
+)
+
+
+# step 2.5 - MODEL EVALUATION
+
+
+val_loss, val_accuracy = dcnn_model.evaluate(validation_generator)
+print(f"\nFinal Validation Accuracy: {val_accuracy:.4f}")
+print(f"Final Validation Loss: {val_loss:.4f}")
+
+train_loss = training_history.history['loss'][-1]
+train_accuracy = training_history.history['accuracy'][-1]
+print(f"Final Training Accuracy: {train_accuracy:.4f}")
+print(f"Final Training Loss: {train_loss:.4f}")
+
+
+# step 2.6 - VISUALIZE TRAINING RESULTS
+
+plt.figure(figsize=(12, 4))
+plt.plot(training_history.history['accuracy'], label="Training Accuracy")
+plt.plot(training_history.history['val_accuracy'], label="Validation Accuracy")
+plt.title("Training and Validation Accuracy")
+plt.xlabel("Epoch")
+plt.ylabel("Accuracy")
+plt.legend()
+plt.show()
+
+plt.figure(figsize=(12, 4))
+plt.plot(training_history.history['loss'], label="Training Loss")
+plt.plot(training_history.history['val_loss'], label="Validation Loss")
+plt.title("Training and Validation Loss")
+plt.xlabel("Epoch")
+plt.ylabel("Loss")
+plt.legend()
+plt.show()
+
+# Save model for Step 2.7
+dcnn_model.save("Aircraft_DCNN_Model.keras")
+print("\n Model saved as 'Aircraft_DCNN_Model.keras'")
+
+# step 2.7 - MODEL TESTING
+
+
+from tensorflow.keras.models import load_model
+
+class ModelTester:
+    def __init__(self, model_path, img_width=500, img_height=500):
+        self.model = load_model(model_path)
+        self.img_width = img_width
+        self.img_height = img_height
+        self.class_labels = ['Crack', 'Missing Head', 'Paint-Off']
+
+    def preprocess_image(self, image_path):
+        img = load_img(image_path, target_size=(self.img_width, self.img_height))
+        img_array = img_to_array(img) / 255.0
+        img_array = np.expand_dims(img_array, axis=0)
+        return img_array
+
+    def make_prediction(self, img_array):
+        return self.model.predict(img_array)
+
+    def plot_results(self, image_path, predictions, true_label):
+        predicted_label = self.class_labels[np.argmax(predictions)]
+        fig, ax = plt.subplots(figsize=(6, 6))
+        img = plt.imread(image_path)
+        plt.imshow(img)
+        ax.axis('off')
+
+        title = f"True Label: {true_label}\nPredicted Label: {predicted_label}"
+        plt.title(title)
+
+        sorted_labels = sorted(zip(self.class_labels, predictions[0]), key=lambda x: x[1], reverse=True)
+        for i, (label, prob) in enumerate(sorted_labels):
+            ax.text(10, 25 + i * 30, f"{label}: {prob * 100:.2f}%", fontsize=10,
+                    bbox=dict(facecolor="lightblue", edgecolor="none"))
+
+        plt.figtext(0.5, 0.01, "Nate [501165955]", ha="center", fontsize=12,
+                    bbox=dict(facecolor="white", edgecolor="none"))
+        plt.tight_layout()
+        plt.show()
+
+    def test_image(self, image_path, true_label):
+        img_array = self.preprocess_image(image_path)
+        predictions = self.make_prediction(img_array)
+        self.plot_results(image_path, predictions, true_label)
+
+# TESTING SAMPLE IMAGES
+
+test_images = [
+    ("Data/Data/test/crack/test_crack.jpg", "Crack"), # Corrected directory name
+    ("Data/Data/test/missing-head/test_missinghead.jpg", "Missing Head"), # Corrected directory name
+    ("Data/Data/test/paint-off/test_paintoff.jpg", "Paint-Off") # Corrected directory name
+]
+
+tester = ModelTester("Aircraft_DCNN_Model.keras")
+
+for image_path, true_label in test_images:
+    tester.test_image(image_path, true_label)
